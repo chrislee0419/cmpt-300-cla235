@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# Cmpt 300 Assignment #1 Test case script
+#
+if [ $# -gt 0 ]; then
+   if [ ! -f testdata/t${1}-et-*.txt ]; then
+     echo "Test Case #"$1 "skipped. Encrypted file" testdata/t${1}-et-*.txt  " not found"
+   else
+      ./lyrebird testdata/t${1}-et-*.txt testdata/t${1}test
+      if [[ $(diff -Z ${2} -s testdata/t${1}-pt-*.txt testdata/t${1}test) != *identical* ]]; then
+         echo "Test Case #"$1 "FAILED"
+         diff -Z testdata/t${1}-pt-*.txt testdata/t${1}test
+      else
+            echo "Test Case #"$1 "passed"
+      fi
+   fi
+else
+   echo Usage $0 "<Test Case Number>"
+fi

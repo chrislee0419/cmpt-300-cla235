@@ -1,0 +1,15 @@
+./input1 ./output/output1
+./input2 ./output/output2
+./input3 ./output/output3
+
+./testdata/t0-et-No-Space.txt
+./testdata/t1-et-No-output.txt 
+./testdata/t2-et-Assignment-Example.txt ./output/test2
+./testdata/t3-et-Doesnt-even-exist-bro.txt ./output/test3
+./testdata/t4-et-Empty-File.txt ./output/test4
+./testdata/t5-et-Single-Tweet-1-char.txt ./output/test5
+./testdata/t6-et-Single-Tweet-20-chars.txt ./output/test6
+./testdata/t7-et-Single-Tweet-139-chars.txt ./output/test7
+./testdata/t8-et-Single-Tweet-140-chars.txt ./output/test8
+./testdata/t9-et-File-with-10-tweets.txt ./output/test9
+./testdata/t10-et-File-with-10000-tweets.txt ./output/test10

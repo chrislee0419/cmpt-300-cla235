@@ -1,0 +1,79 @@
+###########################################################################
+#
+#  CMPT300 Assignment 1 Test Plan
+#  ==============================
+#
+#  Marking Scheme:
+#     70% Program Correctness
+#     30% Code and Documentation Quality
+#
+#  Program Correctness TestCases
+#   1. Code Compiles, generates executable lyrebird that runs
+#   2. Assignment Example runs correctly
+#   3. Usage displayed if two parameters not specified
+#   4. Empty Input File, results in empty output file created
+#   5. Single tweet - 1  character 
+#   6. Single tweet - 20 characters
+#   7. Single tweet - 139 characters
+#   8. Single tweet - 140 characters
+#   9. File with    10 tweets 
+#  10. File with 10000 tweets - check if too slow
+#  11. File with 1 million tweets - check if too slow or runs out of memory
+#  12. Run program twice on same input. Should not combine outputs
+#
+#  To run a specific test above:
+#   - Encoded  tweet filename: t<testnum>-et-<test description>.txt
+#   - Decrypted text filename: t<testnum>-pt-<test description>.txt
+#   1. Use your lyrebird program to decrypt the text into file t<testnum>test
+#      ex) ./lyrebird t2-et-Assignment-Example.txt t2test
+#   2. Use diff command to compare your output to the correct plaintext file
+#      ex) diff -Z t2test t2-pt-Assignment-Example.txt 
+#      Your program passed the test if diff indicates no differences by
+#      printing nothing. Otherwise diff displays the differences between
+#      your program's output and the expected output. It is acceptible
+#      for assignment 1 to have an extra spaces at the end of the line,
+#      so one needs to add the -Z option to ignore those.
+#
+# Invoke this script from the mainline to run all automated tests.
+#
+# Code Quality TestCases
+#   a. Comments for each source file with required information
+#   b. Comments for each procedure or function
+#   c. Describe each significant global or local
+#   d. Good/Clear name choices
+#   e. Good Modularity - dont put everything in main.c!
+#   f. Check for errors when calling system functions like fopen, etc.
+#   g. Report errors reported by called system functions
+#   h. Ensure files closed and memory freed
+#
+# Possible Penalities
+#   1. Memwatch not used, no memwatch log produced
+#   2. Memwatch reports errors or abnormalities
+#   3. Generated executable not called lyrebird
+#   4. Fails to compile (results in Zero for program correctness)
+#   5. Additional output generated either on screen or in output file
+#
+###########################################################################
+
+# Set Options to "-B" to ignore extra blank lines, set to "" otherwise
+# Set Default Options on next line to be used if Options not specified as a parameter
+Options="-B"
+if [ $# -gt 0 ]; then
+   echo "Setting options to" \"${1}\"
+   Options=${1}
+fi
+
+echo Running Automated Correctness Tests
+./runtest  2 $Options
+./runtest  4 $Options  
+./runtest  5 $Options
+./runtest  6 $Options
+./runtest  7 $Options 
+./runtest  8 $Options
+./runtest  9 $Options 
+./runtest 10 $Options
+time (./runtest 11 $Options; echo "Time to decrypt 1 Million Tweets:" )
+
+
+
+

@@ -17,6 +17,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #include "decrypt.h"
 #include "memwatch.h"
@@ -39,16 +41,6 @@ int main (int argc, char** argv) {
         return 1;
     }
 
-    // terminate process if child process id array cannot be malloc'd
-    if (pid == NULL) {
-        current_time = time(NULL);
-        time_string = ctime(&current_time);
-        time_string[strlen(time_string)-1] = '\0';
-        printf("[%s] ERROR in parent process (#%d):\n\t\"pid\" array failed to malloc. Terminating.\n", time_string, getpid());
-        fclose(input);
-        return 2;
-    }
-
     // check scheduling algorithm (terminate if invalid input)
     int method = 0;
 
@@ -56,8 +48,8 @@ int main (int argc, char** argv) {
     memset(method_check, 0, sizeof(char)*20);
     fgets(method_check, 20, input);
 
-    if (strcmp(method_check, "round robin") == 0) method = 1;
-    else if (strcmp(method_check, "fcfs") == 0) method = 2;
+    if (strcmp(method_check, "round robin\n") == 0) method = 1;
+    else if (strcmp(method_check, "fcfs\n") == 0) method = 2;
     else {
         current_time = time(NULL);
         time_string = ctime(&current_time);
@@ -70,17 +62,14 @@ int main (int argc, char** argv) {
     free(method_check);
 
     // count number of cores available for child processes
-    int available_cores = sysconf(_SC_NPROCCESSORS_ONLN) - 1;
+    int available_cores = sysconf(_SC_NPROCESSORS_ONLN) - 1;
 
     // initialize n child processes (n = number of cores)
     // associate children with respective pipes
-    int *pid = malloc(sizeof(int)*cores);
+    int *pid = malloc(sizeof(int) * available_cores);
     int pipes[2*available_cores][2];
-    bool child_check = false;
-    int i, flag;
-
-    if (method == 1) flag = 0;
-    else flag = O_NONBLOCK;
+    int child_check = 0;
+    int i;
 
     for (i = 0; i < available_cores; i++) {
         // create pipes for communication
@@ -94,14 +83,32 @@ int main (int argc, char** argv) {
             pid[i] = -1;
             continue;
         }
-        else if(pipe2(pipes[2*i+1], flag) == -1) {
-            current_time = time(NULL);
-            time_string = ctime(&current_time);
-            time_string[strlen(time_string)-1] = '\0';
-            printf("[%s] WARNING in parent process (#%d):\n\tpipe() returned -1. Skipping.\n", time_string, getpid());
-            pid[i] = -1;
-            continue;
-        }
+        // if round robin, use blocking pipe
+        if (method == 1) {
+	        if (pipe(pipes[2*i+1]) == -1) {
+	            current_time = time(NULL);
+	            time_string = ctime(&current_time);
+	            time_string[strlen(time_string)-1] = '\0';
+	            printf("[%s] WARNING in parent process (#%d):\n\tpipe() returned -1. Skipping.\n", time_string, getpid());
+	            close(pipes[2*i][0]);
+	            close(pipes[2*i][1]);
+	            pid[i] = -1;
+	            continue;
+	        }
+	    }
+	    // if fcfs, use nonblocking pipe
+	    else {
+	    	if (pipe2(pipes[2*i+1], O_NONBLOCK) == -1) {
+	            current_time = time(NULL);
+	            time_string = ctime(&current_time);
+	            time_string[strlen(time_string)-1] = '\0';
+	            printf("[%s] WARNING in parent process (#%d):\n\tpipe() returned -1. Skipping.\n", time_string, getpid());
+	            close(pipes[2*i][0]);
+	            close(pipes[2*i][1]);
+	            pid[i] = -1;
+	            continue;
+	        }
+	    }
 
         // fork() after successful pipe creation
         pid[i] = fork();
@@ -118,7 +125,7 @@ int main (int argc, char** argv) {
             printf("[%s] Child process ID #%d was created successfully (%d).\n", time_string, getpid(), i+1);
             close(pipes[2*i][1]);
             close(pipes[2*i+1][0]);
-            child_check = true;
+            child_check = 1;
 
             break;
         }
@@ -131,7 +138,7 @@ int main (int argc, char** argv) {
     //
     //	CHILD PROCESS BEGINS HERE
     //
-    if (child_check) {
+    if (child_check == 1) {
 		int status = 1, string_length = 0, res;
 		char *input_filename, *output_filename;
 		char* string = malloc(sizeof(char) * 200);
@@ -146,14 +153,20 @@ int main (int argc, char** argv) {
             close(pipes[2*i+1][1]);
             _Exit(EXIT_FAILURE);
         }
+        printf("i: %d, 2*i+1: %d\n", i, 2*i+1);
 
     	// send beginning signal to parent process (ready)
-    	write(pipes[2*i+1][1], &status, sizeof(status));
+    	int x = write(pipes[2*i+1][1], &status, sizeof(status));
+    	printf("child: %d ", x);
 
     	while(read(pipes[2*i][0], &string_length, sizeof(string_length)) != 0) {
+    		printf("%d ", string_length);
     		read(pipes[2*i][0], input_filename, string_length);
+    		printf("%s ", input_filename);
     		read(pipes[2*i][0], &string_length, sizeof(string_length));
+    		printf("%d ", string_length);
     		read(pipes[2*i][0], output_filename, string_length);
+    		printf("%s\n", output_filename);
 
     		printf("[%s] Child process ID #%d will decrypt %s.\n", time_string, getpid(), input_filename);
 
@@ -271,6 +284,7 @@ int main (int argc, char** argv) {
     			fgets(filenames, 2100, input);
     			input_filename = strsep(&filenames, " ");
     			output_filename = strsep(&filenames, "\n");
+    			printf("%s %s\n", input_filename, output_filename);
 
     			// skip the line if no input or output was supplied
     			if (input_filename == NULL || output_filename == NULL) {
@@ -308,7 +322,7 @@ int main (int argc, char** argv) {
 		            	time_string[strlen(time_string)-1] = '\0';
 		            	printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
 
-		        		close(input);
+		        		fclose(input);
 		        		free(filename_ptr);
 		        		free(pid);
 
@@ -318,7 +332,8 @@ int main (int argc, char** argv) {
 		        	i = (i + 1) % available_cores;
 		        }
 		        // check if child process has an unexpected error and is terminating
-		        if (read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
+		        int x;
+		        if (x = read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
 		        	// confirm child process exits before continuing
 		        	for (retry = 0; retry < 3; retry++) {
 			        	pid_check = waitpid(pid[i], &status, 0);
@@ -343,14 +358,20 @@ int main (int argc, char** argv) {
 		        // child process is now ready
 		        // send length of string + null terminator
 		        // then, send the string
+		        printf("read: %d - ", x);
 		        status = strlen(input_filename) + 1;
-		        write(pipes[2*i][1], &status, sizeof(status));
-		        write(pipes[2*i][1], input_filename, status);
+		        x = write(pipes[2*i][1], &status, sizeof(status));
+		        printf("parent: %d ", x);
+		        x = write(pipes[2*i][1], input_filename, status);
+		        printf("%d ", x);
 		        status = strlen(output_filename) + 1;
-		        write(pipes[2*i][1], &status, sizeof(status));
-		        write(pipes[2*i][1], output_filename, status);
+		        x = write(pipes[2*i][1], &status, sizeof(status));
+		        printf("%d ", x);
+		        x = write(pipes[2*i][1], output_filename, status);
+		        printf("%d\n", x);
 
 		        i = (i + 1) % available_cores;
+		        printf("now on process: %d\n", i+1);
 
 		        free(filename_ptr);
     		}
@@ -364,8 +385,7 @@ int main (int argc, char** argv) {
     	//
     	else {
 			ssize_t read_result;
-			bool no_free_process;
-			int crashed;
+			int no_free_process, crashed;
 			i = 0;
 
     		while(!feof(input)) {
@@ -404,10 +424,10 @@ int main (int argc, char** argv) {
 		        }
 				// send input_filename and output_filename to next child process
 		        // child process should send a non-EOF number if ready (blocks)
-		        no_free_process = true;
+		        no_free_process = 1;
 		        crashed = 0;
-		        while (no_free_process) {
-		        	if (pid[i] > 0) read_result = read(pipes[2*i+1][0], &status, sizeof(status))
+		        while (no_free_process == 1) {
+		        	if (pid[i] > 0) read_result = read(pipes[2*i+1][0], &status, sizeof(status));
 		        	else {
 		        		crashed++;
 		        		// if all child processes failed, terminate program
@@ -417,7 +437,7 @@ int main (int argc, char** argv) {
 		            		time_string[strlen(time_string)-1] = '\0';
 		            		printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
 
-		        			close(input);
+		        			fclose(input);
 		        			free(filename_ptr);
 		        			free(pid);
 
@@ -433,8 +453,8 @@ int main (int argc, char** argv) {
 		        		continue;
 		        	}
 		        	// ready child process found
-		        	else if (r > 0) {
-		        		no_free_process = false;
+		        	else if (read_result > 0) {
+		        		no_free_process = 0;
 		        	}
 		        	// found child process with unexpected error and is terminating
 		        	else {
@@ -483,8 +503,10 @@ int main (int argc, char** argv) {
     //	PARENT PROCESS ENDS HERE
     //
 
+    int status, retry = 0;
+
     // close pipes and confirm successful termination of child processes
-    retry = 0;
+    pid_t pid_check;
     for (i = 0; i < available_cores; i++) {
     	if (pid[i] < 0) continue;
     	close(pipes[2*i][1]);

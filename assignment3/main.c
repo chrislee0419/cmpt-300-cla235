@@ -128,20 +128,138 @@ int main (int argc, char** argv) {
         }
     }
 
-    // check if parent or child, branch accordingly
-    // parent should check for failed fork() calls before continuing
-
-    // child process
+    //
+    //	CHILD PROCESS BEGINS HERE
+    //
     if (child_check) {
+		int status = 1, string_length = 0, res;
+		char *input_filename, *output_filename;
+		char* string = malloc(sizeof(char) * 200);
+		FILE *string_input, *string_output;
 
+		if (string == NULL) {
+           	current_time = time(NULL);
+            time_string = ctime(&current_time);
+            time_string[strlen(time_string)-1] = '\0';
+            printf("[%s] ERROR in child process (#%d):\n\tstring failed to malloc. Terminating.\n", time_string, getpid());
+            
+            close(pipes[2*i+1][1]);
+            _Exit(EXIT_FAILURE);
+        }
+
+    	// send beginning signal to parent process (ready)
+    	write(pipes[2*i+1][1], &status, sizeof(status));
+
+    	while(read(pipes[2*i][0], &string_length, sizeof(string_length)) != 0) {
+    		read(pipes[2*i][0], input_filename, string_length);
+    		read(pipes[2*i][0], &string_length, sizeof(string_length));
+    		read(pipes[2*i][0], output_filename, string_length);
+
+    		printf("[%s] Child process ID #%d will decrypt %s.\n", time_string, getpid(), input_filename);
+
+    		string_input = fopen(input_filename, "r");
+    		// test if "string_input" opened successfully
+            if (string_input == NULL) {
+                current_time = time(NULL);
+                time_string = ctime(&current_time);
+                time_string[strlen(time_string)-1] = '\0';
+                printf("[%s] ERROR in child process (#%d):\n\tstring_input failed to open. Terminating.\n", time_string, getpid());
+                
+                close(pipes[2*i+1][1]);
+                free(string);
+
+                _Exit(EXIT_FAILURE);  
+            }
+
+            string_output = fopen(output_filename, "w");
+            // test if "string_output" opened successfully
+            if (string_output == NULL) {
+                current_time = time(NULL);
+                time_string = ctime(&current_time);
+                time_string[strlen(time_string)-1] = '\0';
+                printf("[%s] ERROR in child process (#%d):\n\tstring_output failed to open. Terminating.\n", time_string, getpid());
+                
+                close(pipes[2*i+1][1]);
+                fclose(string_input);
+                free(string);
+
+                _Exit(EXIT_FAILURE);  
+            }
+
+            // begin line by line decryption
+            while (!feof(string_input)) {
+            	memset(string, 0, sizeof(char)*200);
+            	fgets(string, 200, string_input);
+
+            	res = decrypt(string);
+
+            	// if failure, print informative message and exit with EXIT_FAILURE
+            	if (res == 1) {
+                    current_time = time(NULL);
+                    time_string = ctime(&current_time);
+                    time_string[strlen(time_string)-1] = '\0';
+            		printf("[%s] ERROR in child process (#%d):\n\tvariable \"code\" failed to malloc. Terminating.\n", time_string, getpid());
+            		
+                    fclose(string_input);
+                    fclose(string_output);
+                    free(string);
+                    
+                    _Exit(EXIT_FAILURE);
+            	}
+            	else if (res == 2) {
+                    current_time = time(NULL);
+                    time_string = ctime(&current_time);
+                    time_string[strlen(time_string)-1] = '\0';
+            		printf("[%s] ERROR in child process (#%d):\n\tvariable \"table\" failed to malloc. Terminating.\n", time_string, getpid());
+            		
+                    fclose(string_input);
+                    fclose(string_output);
+                    free(string);
+
+                    _Exit(EXIT_FAILURE);
+            	}
+            
+            	fputs(string, string_output);
+            	fputc('\n', string_output);
+            }
+
+            fclose(string_input);
+            fclose(string_output);
+
+            current_time = time(NULL);
+            time_string = ctime(&current_time);
+            time_string[strlen(time_string)-1] = '\0';
+            printf("[%s] Process #ID%d decrypted %s successfully.\n", time_string, getpid(), input_filename);
+    	}
+
+    	free(string);
+
+    	// print message confirming EOF
+            current_time = time(NULL);
+            time_string = ctime(&current_time);
+            time_string[strlen(time_string)-1] = '\0';
+            printf("[%s] Decryption of %s complete.\n\tProcess ID #%d Exiting.\n", time_string, input_filename, getpid());
+            
+            _Exit(EXIT_SUCCESS);
     }
+    //
+    //	CHILD PROCESS ENDS HERE
+    //
 
-    // parent process
+    //
+    //	PARENT PROCESS BEGIN HERE
+    //
     else {
     	// initialize variables for child process to use
     	char *input_filename, *output_filename, *filenames, *filename_ptr;
+    	i = 0;
 
-    	// round robin
+    	pid_t pid_check;
+    	int status, retry = 0;
+
+    	//
+    	//	ROUND ROBIN
+    	//
     	if (method == 1) {
     		while(!feof(input)) {
     			// setup for extracting input and output filenames from one line
@@ -177,13 +295,73 @@ int main (int argc, char** argv) {
 
 		            continue;
 		        }
-
 		        // send input_filename and output_filename to next child process
+		        // child process should send a non-EOF number if ready (blocks)
 
+		        // child process has an unexpected error and is terminating
+		        if (read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
+		        	// confirm child process exits before continuing
+		        	for (retry = 0; retry < 3; retry++) {
+			        	pid_check = waitpid(pid[i], &status, 0);
+			            if (WIFEXITED(status)) {
+			            	current_time = time(NULL);
+			            	time_string = ctime(&current_time);
+			            	time_string[strlen(time_string)-1] = '\0';
+			            	printf("[%s] Child process ID #%d did not terminate successfully.\n", time_string, pid[i]);
+			            }
+			            if (pid_check < 0) {
+		        			retry++;
+		            		current_time = time(NULL);
+		            		time_string = ctime(&current_time);
+		            		time_string[strlen(time_string)-1] = '\0';
+		            		printf("[%s] ERROR in parent process (#%d):\n\twaitpid(%d) returned %d. Retrying (%d of 3).\n", time_string, getpid(), pid[i], (int)pid_check, retry);
+		        			continue;
+		        		}
+		        		break;
+		        	}
+		        	pid[i] = -1;
+		        }
+		        // child process is now ready
+		        // first, check if child process i has not crashed
+		        retry = 0;
+		        while (pid[i] < 0) {
+		        	// if all child processes failed, terminate program
+		        	if (retry == available_cores) {
+		        		current_time = time(NULL);
+		            	time_string = ctime(&current_time);
+		            	time_string[strlen(time_string)-1] = '\0';
+		            	printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
+
+		        		close(input);
+		        		free(filename_ptr);
+		        		free(pid);
+
+		        		return 4;
+		        	}
+		        	retry++;
+		        	i = (i + 1) % available_cores;
+		        }
+		        // next, send length of string + null terminator
+		        // then, send the string
+		        status = strlen(input_filename) + 1;
+		        write(pipes[2*i][1], &status, sizeof(status));
+		        write(pipes[2*i][1], input_filename, status);
+		        status = strlen(output_filename) + 1;
+		        write(pipes[2*i][1], &status, sizeof(status));
+		        write(pipes[2*i][1], output_filename, status);
+
+		        i = (i + 1) % available_cores;
+
+		        free(filename_ptr);
     		}
     	}
+    	//
+    	//	END OF ROUND ROBIN
+    	//
 
-    	// fcfs
+    	//
+    	// FCFS
+    	//
     	else {
     		while(!feof(input)) {
 				// setup for extracting input and output filenames from one line
@@ -222,10 +400,19 @@ int main (int argc, char** argv) {
 
 		        // send input_filename and output_filename to next child process
 		        
+
+		        free(filename_ptr);
 		    }
     	}
-
+    	//
+    	//	END OF FCFS
+    	//
     }
+    //
+    //	PARENT PROCESS ENDS HERE
+    //
+
+    // close pipes and confirm successful termination of child processes
 
     return 0;
 }

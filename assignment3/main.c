@@ -235,12 +235,12 @@ int main (int argc, char** argv) {
     	free(string);
 
     	// print message confirming EOF
-            current_time = time(NULL);
-            time_string = ctime(&current_time);
-            time_string[strlen(time_string)-1] = '\0';
-            printf("[%s] Decryption of %s complete.\n\tProcess ID #%d Exiting.\n", time_string, input_filename, getpid());
+        current_time = time(NULL);
+        time_string = ctime(&current_time);
+        time_string[strlen(time_string)-1] = '\0';
+        printf("[%s] EOF received.\n\tProcess ID #%d Exiting.\n", time_string, getpid());
             
-            _Exit(EXIT_SUCCESS);
+        _Exit(EXIT_SUCCESS);
     }
     //
     //	CHILD PROCESS ENDS HERE
@@ -298,7 +298,26 @@ int main (int argc, char** argv) {
 		        // send input_filename and output_filename to next child process
 		        // child process should send a non-EOF number if ready (blocks)
 
-		        // child process has an unexpected error and is terminating
+		        // first, check if child process i has not crashed
+		        retry = 0;
+		        while (pid[i] < 0) {
+		        	// if all child processes failed, terminate program
+		        	if (retry == available_cores) {
+		        		current_time = time(NULL);
+		            	time_string = ctime(&current_time);
+		            	time_string[strlen(time_string)-1] = '\0';
+		            	printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
+
+		        		close(input);
+		        		free(filename_ptr);
+		        		free(pid);
+
+		        		return 4;
+		        	}
+		        	retry++;
+		        	i = (i + 1) % available_cores;
+		        }
+		        // check if child process has an unexpected error and is terminating
 		        if (read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
 		        	// confirm child process exits before continuing
 		        	for (retry = 0; retry < 3; retry++) {
@@ -322,26 +341,7 @@ int main (int argc, char** argv) {
 		        	pid[i] = -1;
 		        }
 		        // child process is now ready
-		        // first, check if child process i has not crashed
-		        retry = 0;
-		        while (pid[i] < 0) {
-		        	// if all child processes failed, terminate program
-		        	if (retry == available_cores) {
-		        		current_time = time(NULL);
-		            	time_string = ctime(&current_time);
-		            	time_string[strlen(time_string)-1] = '\0';
-		            	printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
-
-		        		close(input);
-		        		free(filename_ptr);
-		        		free(pid);
-
-		        		return 4;
-		        	}
-		        	retry++;
-		        	i = (i + 1) % available_cores;
-		        }
-		        // next, send length of string + null terminator
+		        // send length of string + null terminator
 		        // then, send the string
 		        status = strlen(input_filename) + 1;
 		        write(pipes[2*i][1], &status, sizeof(status));
@@ -363,6 +363,11 @@ int main (int argc, char** argv) {
     	// FCFS
     	//
     	else {
+			ssize_t read_result;
+			bool no_free_process;
+			int crashed;
+			i = 0;
+
     		while(!feof(input)) {
 				// setup for extracting input and output filenames from one line
     			filenames = malloc(sizeof(char)*2100);
@@ -397,12 +402,78 @@ int main (int argc, char** argv) {
 
 		            continue;
 		        }
+				// send input_filename and output_filename to next child process
+		        // child process should send a non-EOF number if ready (blocks)
+		        no_free_process = true;
+		        crashed = 0;
+		        while (no_free_process) {
+		        	if (pid[i] > 0) read_result = read(pipes[2*i+1][0], &status, sizeof(status))
+		        	else {
+		        		crashed++;
+		        		// if all child processes failed, terminate program
+		        		if (crashed == available_cores) {
+		        			current_time = time(NULL);
+		            		time_string = ctime(&current_time);
+		            		time_string[strlen(time_string)-1] = '\0';
+		            		printf("[%s] ERROR in parent process (#%d):\n\tAll child processes have failed. Terminating\n", time_string, getpid());
 
-		        // send input_filename and output_filename to next child process
-		        
+		        			close(input);
+		        			free(filename_ptr);
+		        			free(pid);
+
+		        			return 4;
+		        		}
+		        		i = (i + 1) % available_cores;
+		        		continue;
+		        	}
+
+		        	// not ready
+		        	if (read_result == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+		        		i = (i + 1) % available_cores;
+		        		continue;
+		        	}
+		        	// ready child process found
+		        	else if (r > 0) {
+		        		no_free_process = false;
+		        	}
+		        	// found child process with unexpected error and is terminating
+		        	else {
+		        		// confirm child process exits before continuing
+		        		for (retry = 0; retry < 3; retry++) {
+				        	pid_check = waitpid(pid[i], &status, 0);
+				            if (WIFEXITED(status)) {
+				            	current_time = time(NULL);
+				            	time_string = ctime(&current_time);
+				            	time_string[strlen(time_string)-1] = '\0';
+				            	printf("[%s] Child process ID #%d did not terminate successfully.\n", time_string, pid[i]);
+				            }
+				            if (pid_check < 0) {
+			        			retry++;
+			            		current_time = time(NULL);
+			            		time_string = ctime(&current_time);
+			            		time_string[strlen(time_string)-1] = '\0';
+			            		printf("[%s] ERROR in parent process (#%d):\n\twaitpid(%d) returned %d. Retrying (%d of 3).\n", time_string, getpid(), pid[i], (int)pid_check, retry);
+			        			continue;
+			        		}
+			        		break;
+			        	}
+		        		pid[i] = -1;
+		        	}
+		        }
+		        // free process has been found, send filenames to process
+		        // send length of string + null terminator
+		        // then, send the string
+		        status = strlen(input_filename) + 1;
+		        write(pipes[2*i][1], &status, sizeof(status));
+		        write(pipes[2*i][1], input_filename, status);
+		        status = strlen(output_filename) + 1;
+		        write(pipes[2*i][1], &status, sizeof(status));
+		        write(pipes[2*i][1], output_filename, status);
+
+		        i = (i + 1) % available_cores;
 
 		        free(filename_ptr);
-		    }
+    		}
     	}
     	//
     	//	END OF FCFS
@@ -413,6 +484,42 @@ int main (int argc, char** argv) {
     //
 
     // close pipes and confirm successful termination of child processes
+    retry = 0;
+    for (i = 0; i < available_cores; i++) {
+    	if (pid[i] < 0) continue;
+    	close(pipes[2*i][1]);
+
+    	pid_check = waitpid(pid[i], &status, 0);
+    	// check exit status of child process, print associated confirmation
+        if (WIFEXITED(status)) {
+            if (WEXITSTATUS(status) == EXIT_SUCCESS) {
+                current_time = time(NULL);
+                time_string = ctime(&current_time);
+                time_string[strlen(time_string)-1] = '\0';
+                printf("[%s] Child process ID #%d confirmed to have terminated successfully.\n", time_string, pid[i]);
+            }
+            else if (WEXITSTATUS(status) == EXIT_FAILURE) {
+                current_time = time(NULL);
+                time_string = ctime(&current_time);
+                time_string[strlen(time_string)-1] = '\0';
+                printf("[%s] Child process ID #%d did not terminate successfully.\n", time_string, pid[i]);
+            }
+        }
+
+        // if waitpid() was interrupted, retry (max 3 tries)
+        if (pid_check < 0) {
+        	retry++;
+            current_time = time(NULL);
+            time_string = ctime(&current_time);
+            time_string[strlen(time_string)-1] = '\0';
+            printf("[%s] ERROR in parent process (#%d):\n\twaitpid(%d) returned %d. Retrying (%d of 3)\n", time_string, getpid(), pid[i], (int)pid_check, retry);
+        	if (retry < 3) i--;
+            else retry = 0;
+        }
+    }
+
+    fclose(input);
+    free(pid);
 
     return 0;
 }

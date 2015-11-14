@@ -124,10 +124,10 @@ int main (int argc, char** argv) {
             time_string[strlen(time_string)-1] = '\0';
             printf("[%s] Child process ID #%d was created successfully (%d).\n", time_string, getpid(), i+1);
             int j;
-            // for (j = i-1; j > -1; j--) {
-            //     close(pipes[2*j][0]);
-            //     close(pipes[2*j+1][1]);
-            // }
+            for (j = i-1; j > -1; j--) {
+                close(pipes[2*j][1]);
+                close(pipes[2*j+1][0]);
+            }
 
             close(pipes[2*i][1]);
             close(pipes[2*i+1][0]);
@@ -167,14 +167,10 @@ int main (int argc, char** argv) {
         int a;
 
     	while(a = read(pipes[2*i][0], &string_length, sizeof(string_length)) > 0) {
-            printf("[%d]: sent %d bytes (ready signal)\n", getpid(), a);
     		read(pipes[2*i][0], input_filename, string_length);
     		read(pipes[2*i][0], &string_length, sizeof(string_length));
     		read(pipes[2*i][0], output_filename, string_length);
 
-            printf("[%d] has done %d\n", getpid(), counter++);
-
-            printf("[%d] %s %s\n", getpid(), input_filename, output_filename);
     		printf("[%s] Child process ID #%d will decrypt %s.\n", time_string, getpid(), input_filename);
 
     		string_input = fopen(input_filename, "r");
@@ -183,14 +179,11 @@ int main (int argc, char** argv) {
                 current_time = time(NULL);
                 time_string = ctime(&current_time);
                 time_string[strlen(time_string)-1] = '\0';
-                printf("[%s] ERROR in child process (#%d):\n\tstring_input failed to open. Terminating.\n", time_string, getpid());
+                printf("[%s] WARNING in child process (#%d):\n\tstring_input failed to open. Fkipping file.\n", time_string, getpid());
                 
-                close(pipes[2*i+1][1]);
-                free(input_filename);
-                free(output_filename);
-                free(string);
+    			write(pipes[2*i+1][1], &status, sizeof(status));
 
-                _Exit(EXIT_FAILURE);  
+                continue;  
             }
 
             string_output = fopen(output_filename, "w");
@@ -199,15 +192,11 @@ int main (int argc, char** argv) {
                 current_time = time(NULL);
                 time_string = ctime(&current_time);
                 time_string[strlen(time_string)-1] = '\0';
-                printf("[%s] ERROR in child process (#%d):\n\tstring_output failed to open. Terminating.\n", time_string, getpid());
+                printf("[%s] WARNING in child process (#%d):\n\tstring_output failed to open. Skipping file.\n", time_string, getpid());
                 
-                close(pipes[2*i+1][1]);
-                fclose(string_input);
-                free(input_filename);
-                free(output_filename);
-                free(string);
+    			write(pipes[2*i+1][1], &status, sizeof(status));
 
-                _Exit(EXIT_FAILURE);  
+                continue; 
             }
 
             // begin line by line decryption
@@ -258,10 +247,15 @@ int main (int argc, char** argv) {
             time_string = ctime(&current_time);
             time_string[strlen(time_string)-1] = '\0';
             printf("[%s] Process #ID%d decrypted %s successfully.\n", time_string, getpid(), input_filename);
+    		write(pipes[2*i+1][1], &status, sizeof(status));
     	}
 
         if (a == -1) {
-            printf("[%d] read returned -1 (%d)\n", getpid(), errno);
+    		// print message stating read fails
+        	current_time = time(NULL);
+        	time_string = ctime(&current_time);
+        	time_string[strlen(time_string)-1] = '\0';
+            printf("[%s] ERROR in child process (#%d):\n\tread() returned -1\n", time_string, getpid());
             free(string);
             free(input_filename);
             free(output_filename);
@@ -333,9 +327,6 @@ int main (int argc, char** argv) {
                 }
 
     			output_filename = strsep(&filenames, "\n");
-                
-    			// skip the line if no input or output was supplied
-    			
 
         		// skip the line if input and output are the same
         		if (strcmp(input_filename, output_filename) == 0) {
@@ -372,8 +363,7 @@ int main (int argc, char** argv) {
 		        }
 		        // check if child process has an unexpected error and is terminating
 		        int x;
-                printf("Parent 1: Before read\n");
-		        if (x = read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
+                if (x = read(pipes[2*i+1][0], &status, sizeof(status)) == 0) {
 		        	// confirm child process exits before continuing
 		        	for (retry = 0; retry < 3; retry++) {
 			        	pid_check = waitpid(pid[i], &status, 0);
@@ -398,8 +388,7 @@ int main (int argc, char** argv) {
 		        // child process is now ready
 		        // send length of string + null terminator
 		        // then, send the string
-                printf("Parent 2: Now sending input: %s, output: %s\n", input_filename, output_filename);
-		        status = strlen(input_filename) + 1;
+                status = strlen(input_filename) + 1;
 		        x = write(pipes[2*i][1], &status, sizeof(status));
 		        x = write(pipes[2*i][1], input_filename, status);
 		        status = strlen(output_filename) + 1;
@@ -431,23 +420,35 @@ int main (int argc, char** argv) {
 
     			// split "filenames" string to input and output components
     			fgets(filenames, 2100, input);
+
+    			if (strlen(filenames) == 1) {
+                    current_time = time(NULL);
+                    time_string = ctime(&current_time);
+                    time_string[strlen(time_string)-1] = '\0';
+                    printf("[%s] WARNING in parent process (#%d):\n\t\"filenames\" is NULL. Skipping.\n", time_string, getpid());
+                    
+                    free(filename_ptr);
+
+                    continue;
+                }
+
     			input_filename = strsep(&filenames, " ");
+
+    			if (filenames == NULL) {
+                    current_time = time(NULL);
+                    time_string = ctime(&current_time);
+                    time_string[strlen(time_string)-1] = '\0';
+                    printf("[%s] WARNING in parent process (#%d):\n\t\"input_filename\" or \"output_filename\" is NULL. Skipping.\n", time_string, getpid());
+                    
+                    free(filename_ptr);
+
+                    continue;
+                }
+
     			output_filename = strsep(&filenames, "\n");
 
-    			// skip the line if no input or output was supplied
-    			if (input_filename == NULL || output_filename == NULL) {
-		            current_time = time(NULL);
-		            time_string = ctime(&current_time);
-		            time_string[strlen(time_string)-1] = '\0';
-		            printf("[%s] WARNING in parent process (#%d):\n\t\"input_filename\" or \"output_filename\" is NULL. Skipping.\n", time_string, getpid());
-		            
-		            free(filename_ptr);
-
-		            continue;
-        		}
-
         		// skip the line if input and output are the same
-        		else if (strcmp(input_filename, output_filename) == 0) {
+        		if (strcmp(input_filename, output_filename) == 0) {
 		            current_time = time(NULL);
 		            time_string = ctime(&current_time);
 		            time_string[strlen(time_string)-1] = '\0';
@@ -459,6 +460,7 @@ int main (int argc, char** argv) {
 		        }
 				// send input_filename and output_filename to next child process
 		        // child process should send a non-EOF number if ready (blocks)
+		        // use select for next assignment (currently using busy waiting)
 		        no_free_process = 1;
 		        crashed = 0;
 		        while (no_free_process == 1) {
@@ -543,6 +545,7 @@ int main (int argc, char** argv) {
     // close pipes and confirm successful termination of child processes
     pid_t pid_check;
     for (i = 0; i < available_cores; i++) {
+    	printf("Parent 3: Closing pipe for %d.\n", pid[i]);
     	if (pid[i] < 0) continue;
     	close(pipes[2*i][1]);
 

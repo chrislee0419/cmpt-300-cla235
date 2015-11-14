@@ -495,6 +495,7 @@ int main (int argc, char** argv) {
 		        	}
 		        	// found child process with unexpected error and is terminating
 		        	else {
+		        		close(pipes[2*i][1]);
 		        		// confirm child process exits before continuing
 		        		for (retry = 0; retry < 3; retry++) {
 				        	pid_check = waitpid(pid[i], &status, 0);
@@ -545,7 +546,6 @@ int main (int argc, char** argv) {
     // close pipes and confirm successful termination of child processes
     pid_t pid_check;
     for (i = 0; i < available_cores; i++) {
-    	printf("Parent 3: Closing pipe for %d.\n", pid[i]);
     	if (pid[i] < 0) continue;
     	close(pipes[2*i][1]);
 

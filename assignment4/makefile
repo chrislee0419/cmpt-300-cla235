@@ -8,22 +8,28 @@
 #	TA: 		Scott Kristjanson
 #######################################
 
-CCMAIN = main.c
 CC = gcc
 CCOPTS = -g
 LIBS = -lm
-OBJS = main.c decrypt.c
-CCEXEC = lyrebird
+OBJS = decrypt.c util.c
+SERVER = server.c
+CLIENT = client.c
+SERVEREXEC = lyrebird.server
+CLIENTEXEC = lyrebird.client
 MEMVAR = -DMEMWATCH -DMW_STDIO
 MEM = memwatch.c
 
-all: $(CCEXEC)
+all: $(SERVEREXEC) $(CLIENTEXEC)
 
-$(CCEXEC):	$(OBJS) $(MEM)
-	$(CC) $(CCOPTS) $(MEMVAR) $(OBJS) $(MEM) -o $@ $(LIBS)
+$(SERVEREXEC):	$(OBJS) $(SERVER) $(MEM)
+	$(CC) $(CCOPTS) $(MEMVAR) $(OBJS) $(SERVER) $(MEM) -o $@ $(LIBS)
+
+$(CLIENTEXEC):	$(OBJS) $(CLIENT) $(MEM)
+	$(CC) $(CCOPTS) $(MEMVAR) $(OBJS) $(CLIENT) $(MEM) -o $@ $(LIBS)
 
 clean:
-	rm -f $(CCEXEC)
+	rm -f $(SERVEREXEC)
+	rm -f $(CLIENTEXEC)
 	rm -f *.o
 	rm -f memwatch.log
 	rm -f core

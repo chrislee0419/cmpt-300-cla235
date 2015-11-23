@@ -13,6 +13,7 @@
 #define _UTIL_H_
 
 void printTime();
+int childDecrypt(char* input_filename, char* output_filename);
 
 
 #endif 

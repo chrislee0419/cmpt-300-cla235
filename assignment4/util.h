@@ -14,7 +14,7 @@
 
 void printTime();
 void logTime(FILE* log_file);
-void logMessage(FILE* log_file, char* message);
+void logMessage(char* message, FILE* log_file);
 int childDecrypt(char* input_filename, char* output_filename);
 
 

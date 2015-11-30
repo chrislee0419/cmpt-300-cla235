@@ -44,7 +44,7 @@ void logTime(FILE* file) {
 }
 
 // outputs time and a message to the log file
-void logMessage(FILE* file, char* message) {
+void logMessage(char* message, FILE* file) {
 	logTime(file);
 	fputs(message, file);
 }

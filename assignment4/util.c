@@ -29,6 +29,26 @@ void printTime() {
     printf("[%s] ", time_string);
 }
 
+// writes "[current time] " to log file
+void logTime(FILE* file) {
+	time_t current_time;
+	char* time_string;
+
+    current_time = time(NULL);
+    time_string = ctime(&current_time);
+    time_string[strlen(time_string)-1] = '\0';
+
+    fputc('[', file);
+    fputs(time_string, file);
+    fputs("] ", file);
+}
+
+// outputs time and a message to the log file
+void logMessage(FILE* file, char* message) {
+	logTime(file);
+	fputs(message, file);
+}
+
 // returns:
 //		0: successful decryption
 //		1: failed to open files (child process should get next filename)

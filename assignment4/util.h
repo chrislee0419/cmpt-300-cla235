@@ -13,6 +13,8 @@
 #define _UTIL_H_
 
 void printTime();
+void logTime(FILE* log_file);
+void logMessage(FILE* log_file, char* message);
 int childDecrypt(char* input_filename, char* output_filename);
 
 

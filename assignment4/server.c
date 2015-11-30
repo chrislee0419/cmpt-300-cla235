@@ -88,9 +88,7 @@ int main(int argc, char** argv) {
 
 	// loop through servinfo and bind to first possible
 	for (i = servinfo; i != NULL; i = i->ai_next) {
-		printf("looping\n");
 		if ((socket_fd = socket(i->ai_family, i->ai_socktype, i->ai_protocol)) == -1) {
-			perror("socket");
 			continue;
 		}
 

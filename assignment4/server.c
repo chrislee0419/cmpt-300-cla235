@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
 		snprintf(log_message, 1024, "ERROR in PID#%d: getaddrinfo() returned %d, expected 0. Terminating.\n", getpid(), status);
 		logMessage(log_message, log_file);
 		fclose(log_file);
+		fclose(config_file);
 		return 3;
 	}
 
@@ -96,6 +97,7 @@ int main(int argc, char** argv) {
 			snprintf(log_message, 1024, "ERROR in PID#%d: setsockopt() returned -1, expected 0. Terminating.\n", getpid());
 			logMessage(log_message, log_file);
 			fclose(log_file);
+			fclose(config_file);
 			return 4;
 		}
 
@@ -112,6 +114,7 @@ int main(int argc, char** argv) {
 		snprintf(log_message, 1024, "ERROR in PID#%d: Unable to bind() successfully. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
+		fclose(config_file);
 		return 5;
 	}
 
@@ -119,6 +122,7 @@ int main(int argc, char** argv) {
 		snprintf(log_message, 1024, "ERROR in PID%d: Unable to listen() successfully. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
+		fclose(config_file);
 		close(socket_fd);
 		return 6;
 	}
@@ -130,6 +134,7 @@ int main(int argc, char** argv) {
 		snprintf(log_message, 1024, "ERROR in PID%d: getsockname() failed. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
+		fclose(config_file);
 		close(socket_fd);
 		return 7;
 	}
@@ -146,17 +151,83 @@ int main(int argc, char** argv) {
 		if (addr_ptr->ifa_addr->sa_family == AF_INET) {
 			temp_ptr = &((struct sockaddr_in *)addr_ptr->ifa_addr)->sin_addr;
 			inet_ntop(AF_INET, temp_ptr, ip_string, INET_ADDRSTRLEN);
+			if (strcmp(ip_string, "127.0.0.1") == 0) continue;
 			break;
 		}
 	}
+	if (ifaddrs_variable != NULL) freeifaddrs(ifaddrs_variable);
 
 	printTime();
 	printf("lyrebird.server: PID %d on host %s, port %d\n", getpid(), ip_string, port_num);
 
-	// main operational loop
-	// while (1) {
+	// prepare variables for main loop
+	int client_num = 0, i;
+	int *client_fd = malloc(sizeof(int));
 
-	// }
+	if (client_fd == NULL) {
+		snprintf(log_message, 1024, "ERROR in PID%d: malloc() failed. Terminating.\n", getpid());
+		logMessage(log_message, log_file);
+		fclose(log_file);
+		fclose(config_file);
+		close(socket_fd);
+		return 8;
+	}
+
+	// first accept(), can block if needed
+	client_fd[0] = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
+					&client_addr_size);
+	if (client_fd[0] == -1) {
+		snprintf(log_message, 1024, "ERROR in PID%d: initial accept() failed. Terminating.\n", getpid());
+		logMessage(log_message, log_file);
+		free(client_fd);
+		fclose(log_file);
+		fclose(config_file);
+		close(socket_fd);
+		return 9;
+	}
+	client_num = 1;
+	// realloc client_fd to accomodate for another connection
+	for (i = 0; i < 3; i++) {
+		temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
+		if (temp_ptr == NULL) {
+			if (i == 2) {
+				snprintf(log_message, 1024, "ERROR in PID%d: realloc() failed multiple times. Terminating.\n", getpid());
+				logMessage(log_message, log_file);
+				free(client_fd);
+				fclose(log_file);
+				fclose(config_file);
+				close(socket_fd);
+				return 10;
+			}
+		}
+		else break;
+	}
+
+
+
+	// main operational loop
+	while (1) {
+		// accept() if there are connections, does not block
+		client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
+								&client_addr_size, SOCK_NONBLOCK);
+		if (client_fd[client_num] == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+			for (i = 1; i < 3; i++) {
+				snprintf(log_message, 1024, "WARNING in PID%d: accept4() failed. Retrying (%d of 3).\n", getpid(), i);
+				logMessage(log_message, log_file);
+				client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
+										&client_addr_size, SOCK_NONBLOCK);
+				if (client_fd[client_num] != -1 || errno == EAGAIN || errno == EWOULDBLOCK) break;
+			}
+			if (i == 3) {
+				snprintf(log_message, 1024, "ERROR in PID%d: accept4() failed too many times. Terminating.\n", getpid());
+				logMessage(log_message, log_file);
+				// terminate program
+				// ensure that clients also terminate correctly
+			}
+		}
+		client_num++;
+		temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
+	}
 
 	fclose(log_file);
 	close(socket_fd);

@@ -161,6 +161,8 @@ int main(int argc, char** argv) {
 	printf("lyrebird.server: PID %d on host %s, port %d\n", getpid(), ip_string, port_num);
 
 	// prepare variables for main loop
+	fd_set client_fd_set;
+	struct timeval tv;
 	int client_num = 0, i;
 	int *client_fd = malloc(sizeof(int));
 
@@ -227,6 +229,12 @@ int main(int argc, char** argv) {
 		}
 		client_num++;
 		temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
+
+		// check for closed streams
+
+		// select non-busy connection
+		// if return value is not 1, report error
+
 	}
 
 	fclose(log_file);

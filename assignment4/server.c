@@ -151,14 +151,9 @@ int main(int argc, char** argv) {
 	printTime();
 	printf("lyrebird.server: PID %d on host %s, port %d\n", getpid(), ip_string, port_num);
 
-	//
-	// V2
-	//
 	fd_set fd_list;
 	fd_set fd_list_copy;
 	struct timeval tv;
-	tv->sec = 0;
-	tv->usec = 1000;
 	int new_fd, num_bytes, status;
 	int fd_max = server_fd;
 	int client_count = 0;
@@ -166,14 +161,33 @@ int main(int argc, char** argv) {
 
 	FD_SET(server_fd, &fd_list);
 
+	//
+	//	MAIN OPERATIONAL LOOP
 	while (1) {
 		client_addr_size = sizeof(connecting_addr);
 		// exit loop if there are no more clients, and all files are complete
 		if (!feof(config_file) && client_count == 0) break;
 
 		fd_list_copy = fd_list;
+		tv->sec = 0;
+		tv->usec = 1000;
 		if (select(fd_max+1, &fd_list_copy, NULL, NULL, tv) == -1) {
 			// *** close connections and exit with failure
+			snprintf(log_message, 2000, "ERROR in PID#%d: select() failed. Terminating.\n", getpid());
+			logMessage(log_message, log_file);
+			for (i = 0; i <= fd_max; i++) {
+				if (FD_ISSET(i, &fd_list) && i != socket_fd) {
+					getpeername(i, (struct sockaddr *)&connecting_addr, &client_addr_size);
+					inet_ntop(	connecting_addr.ss_family, &connecting_addr->sin_address,
+								ip_string, INET_ADDRSTRLEN);
+					memset(buffer, 0, sizeof(char)*2100);
+					strcpy(buffer, "ayylmao");
+					send(i, &buffer, status, 0);
+					while (recv(i, &status, sizeof(status), 0) > 0);
+					snprintf(log_message, 2000, "lyrebird client %s has disconnected.\n", ip_string);
+					logMessage(log_message, log_file);
+				}
+			}
 		}
 
 		for (i = 0; i <= fd_max; i++) {
@@ -234,6 +248,7 @@ int main(int argc, char** argv) {
 					else {
 						// if it's not the first time connecting, log decryption results
 						if (status != -1) {
+							memset(buffer, 0, sizeof(char)*2100);
 							recv(i, &buffer, status, 0);				// filename
 							recv(i, &status, sizeof(status), 0);		// result
 							if (status == 0) {		// decryption success
@@ -246,7 +261,8 @@ int main(int argc, char** argv) {
 							else {		// decryption failure
 								recv(i, &status, sizeof(status), 0);	// pid
 								snprintf(	log_message, 2000, "The lyrebird client %s
-											has successfully decrypted %s in process %d.\n",
+											has encountered an error: %s could not be 
+											decrypted successfully in process %d.\n",
 											ip_string, buffer, status);
 								logMessage(log_message, log_file);
 							}
@@ -254,9 +270,15 @@ int main(int argc, char** argv) {
 						// send another file if available
 						// otherwise, send terminating codeword
 						if (!feof(config_file)) {
+							memset(buffer, 0, sizeof(char)*2100);
 							fgets(buffer, 2100, config_file);
 							status = strlen(buffer) + 1;
 							send(i, &buffer, status, 0);
+							buffer = strsep(buffer, " ");
+							snprintf(	log_message, 2000, "The lyrebird client %s
+										has been given the task of decrypting %s.",
+										ip_string, buffer);
+							logMessage(log_message, log_file);
 						}
 						else {
 							memset(buffer, 0, sizeof(char)*2100);
@@ -268,94 +290,14 @@ int main(int argc, char** argv) {
 			}
 		}
 	}
-
-
-	//
-	// V1
+	//	END OF MAIN OPERATIONAL LOOP
 	//
 
-	// prepare variables for main loop
-	// fd_set client_fd_set;
-	// struct timeval tv;
-	// int client_num = 0, i;
-	// int *client_fd = malloc(sizeof(int));
-	// int fd_max;
-
-	// tv->tv_sec = 0;
-	// tv->tv_usec = 1000;
-
-	// if (client_fd == NULL) {
-	// 	snprintf(log_message, 1024, "ERROR in PID%d: malloc() failed. Terminating.\n", getpid());
-	// 	logMessage(log_message, log_file);
-	// 	fclose(log_file);
-	// 	fclose(config_file);
-	// 	close(socket_fd);
-	// 	return 8;
-	// }
-
-	// // first accept(), can block if needed
-	// client_fd[0] = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
-	// 				&client_addr_size);
-	// if (client_fd[0] == -1) {
-	// 	snprintf(log_message, 1024, "ERROR in PID%d: initial accept() failed. Terminating.\n", getpid());
-	// 	logMessage(log_message, log_file);
-	// 	free(client_fd);
-	// 	fclose(log_file);
-	// 	fclose(config_file);
-	// 	close(socket_fd);
-	// 	return 9;
-	// }
-	// client_num = 1;
-	// // realloc client_fd to accomodate for another connection
-	// for (i = 0; i < 3; i++) {
-	// 	temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
-	// 	if (temp_ptr == NULL) {
-	// 		if (i == 2) {
-	// 			snprintf(log_message, 1024, "ERROR in PID%d: realloc() failed multiple times. Terminating.\n", getpid());
-	// 			logMessage(log_message, log_file);
-	// 			free(client_fd);
-	// 			fclose(log_file);
-	// 			fclose(config_file);
-	// 			close(socket_fd);
-	// 			return 10;
-	// 		}
-	// 	}
-	// 	else break;
-	// }
-
-
-
-	// // main operational loop
-	// while (1) {
-	// 	// accept() if there are connections, does not block
-	// 	client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
-	// 							&client_addr_size, SOCK_NONBLOCK);
-	// 	if (client_fd[client_num] == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-	// 		for (i = 1; i < 3; i++) {
-	// 			snprintf(log_message, 1024, "WARNING in PID%d: accept4() failed. Retrying (%d of 3).\n", getpid(), i);
-	// 			logMessage(log_message, log_file);
-	// 			client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
-	// 									&client_addr_size, SOCK_NONBLOCK);
-	// 			if (client_fd[client_num] != -1 || errno == EAGAIN || errno == EWOULDBLOCK) break;
-	// 		}
-	// 		if (i == 3) {
-	// 			snprintf(log_message, 1024, "ERROR in PID%d: accept4() failed too many times. Terminating.\n", getpid());
-	// 			logMessage(log_message, log_file);
-	// 			// terminate program
-	// 			// ensure that clients also terminate correctly
-	// 		}
-	// 	}
-	// 	client_num++;
-	// 	temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
-
-	// 	// check for closed streams
-
-	// 	// select non-busy connection
-	// 	// if return value is not 1, report error
-
-	// }
+	printTime();
+	printf("lyrebird server: PID %d completed its tasks and is exiting successfully.\n", getpid());
 
 	fclose(log_file);
+	fclose(config_file);
 	close(socket_fd);
 
 	return 0;

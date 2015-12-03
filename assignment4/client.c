@@ -36,7 +36,6 @@ int main (int argc, char** argv) {
 		return 1;
 	}
 	int port = atoi(argv[2]);
-	char *address = argv[1];
 	// END OF PREPARATION
 	//
 
@@ -49,7 +48,7 @@ int main (int argc, char** argv) {
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 
-	if ((status = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
+	if ((status = getaddrinfo(argv[1], port, &hints, &servinfo)) != 0) {
 		printf("ERROR in PID#%d:\n\tgetaddrinfo() failed for the provided arguments.\n\tTerminating.\n", getpid());
 		return 2;
 	}
@@ -151,8 +150,8 @@ int main (int argc, char** argv) {
 		// initialize variables
 		fd_set fd_read_list;
 		fd_set fd_copy_list;
-		int num_bytes;
-		int status = 0;
+		int num_bytes, length;
+		int status = -1;
 		int fd_max = 0;
 		char *input_filename, *output_filename, *filenames, *filename_ptr;
 		char buffer[1024];
@@ -164,32 +163,41 @@ int main (int argc, char** argv) {
 				if (fd_max < pipes[2*i+1][0]) fd_max = pipes[2*i+1][0];
 			}
 		}
-		// *** send dummy messages to server to get new files
-		send()
+		// send negative integer to show initial ready status
+		send(socket_fd, &status, sizeof(int), 0);
 
 		// main loop
 		while(1) {
-			// *** check if there is still at least one child process hasn't crashed
-			filenames = malloc(sizeof(char)*2100);
-			if (filenames == NULL) {
-				// *** terminate all processes and close connection (break?)
+			// check if there is still at least one child process hasn't crashed
+			status = 0;
+			for (i = 0; i < available_cores; i++) {
+				if (pid[i] > 0) {
+					status = 1;
+					break;
+				}
 			}
+			if (status == 0) break;
+
+
+			filenames = malloc(sizeof(char)*2100);
+			if (filenames == NULL) break;
 			memset(filenames, 0, sizeof(char)*2100);
 			filename_ptr = filenames;
 
 			// receive filename from server
 			if ((num_bytes = recv(socket_fd, filenames, 2100, 0)) == -1) {
 				free(filenames);
-				// *** terminate all processes and close connection (break?)
+				break;
 			}
 			// server has sent termination codeword
 			if (strcmp(filenames, "ayylmao") == 0) {
 				free(filenames);
-				// *** server has no more files, terminate child processes and close (break?)
+				break;
 			}
 			input_filename = strsep(filenames, ' ');
 			output_filename = strsep(filenames, '\n');
 			if (strcmp(input_filename, output_filename) == 0) {
+				// *** send failure status? (same filenames)
 				free(filename_ptr);
 				continue;
 			}
@@ -197,16 +205,13 @@ int main (int argc, char** argv) {
 			fd_copy_list = fd_read_list;
 			if (select(fd_max+1, &fd_copy_list, NULL, NULL, NULL) == -1) {
 				free(filenames);
-				// *** send child processes the termination command
-				// *** close pipes, send message to server, and terminate (break?)
+				break;
 			}
 
 			for (i = 0; i <= fd_max; i++) {
 				// check if the ith file descriptor is ready to be read from
 				if (FD_ISSET(i, &fd_copy_list)) {
 					for (j = 0; j < available_cores; j++) if (pipes[2*j+1][0] == i) break;
-
-					// *** if child has crashed, remove from the set and continue
 					num_bytes = read(i, &status, sizeof(status));	// filename length
 					// child process has encountered an error that has caused an exit
 					if (num_bytes == 0) {
@@ -216,10 +221,11 @@ int main (int argc, char** argv) {
 					}
 					read(i, &buffer, status);						// filename
 					read(i, &status, sizeof(status));				// result
-					// *** double check if sockets/recv() can take everything from fd
-					send(socket_fd, &buffer, 1024);					// filename
-					send(socket_fd, &status, sizeof(status));		// result
-					send(socket_fd, &pid[j], sizeof(int));			// pid
+					length = strlen(buffer);
+					send(socket_fd, &length, sizeof(int), 0);
+					send(socket_fd, &buffer, length, 0);			// filename
+					send(socket_fd, &status, sizeof(status), 0);	// result
+					send(socket_fd, &pid[j], sizeof(int), 0);		// pid
 
 					// ready for next file
 					status = strlen(input_filename) + 1;
@@ -232,11 +238,19 @@ int main (int argc, char** argv) {
 		        	break;
 				}
 			}
-
-
+		}
+		// completion or failure event has caused the termination of the program
+		for (i = 0; i < available_cores; i++) {
+			// if child process had already previously crashed, skip
+			if (pid[i] < 0) continue;
+			close(pipes[2*i][1]);		// close write pipe
+			close(pipes[2*i+1][0]);		// close read pipe
+			confirmTermination(pid[i]);
 		}
 	}
 	//	PARENT PROCESS ENDS HERE
 	//
+
+	return 0;
 
 }

@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
 
 	// prepares log file
 	FILE* log_file;
-	char log_message[1024];
+	char log_message[2000];
 	if ((log_file = prepareFile(argv[2], "w")) == NULL) return 2;
 
 	// open config file
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
 	struct sockaddr_in sin;
 	struct sockaddr_storage connecting_addr;
 	socklen_t server_addr_size = sizeof(sin);
-	socklen_t client_addr_size = sizeof(connecting_addr);
+	socklen_t client_addr_size;
 
 	int enable = 1;
 
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
 	hints.ai_flags = AI_PASSIVE;
 
 	if ((status = getaddrinfo(NULL, "0", &hints, &servinfo)) != 0) {
-		snprintf(log_message, 1024, "ERROR in PID#%d: getaddrinfo() returned %d, expected 0. Terminating.\n", getpid(), status);
+		snprintf(log_message, 2000, "ERROR in PID#%d: getaddrinfo() returned %d, expected 0. Terminating.\n", getpid(), status);
 		logMessage(log_message, log_file);
 		fclose(log_file);
 		fclose(config_file);
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
 		}
 
 		if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == -1) {
-			snprintf(log_message, 1024, "ERROR in PID#%d: setsockopt() returned -1, expected 0. Terminating.\n", getpid());
+			snprintf(log_message, 2000, "ERROR in PID#%d: setsockopt() returned -1, expected 0. Terminating.\n", getpid());
 			logMessage(log_message, log_file);
 			fclose(log_file);
 			fclose(config_file);
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 	freeaddrinfo(servinfo);
 
 	if (i == NULL) {
-		snprintf(log_message, 1024, "ERROR in PID#%d: Unable to bind() successfully. Terminating.\n", getpid());
+		snprintf(log_message, 2000, "ERROR in PID#%d: Unable to bind() successfully. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
 		fclose(config_file);
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (listen(socket_fd, BACKLOG) == -1) {
-		snprintf(log_message, 1024, "ERROR in PID%d: Unable to listen() successfully. Terminating.\n", getpid());
+		snprintf(log_message, 2000, "ERROR in PID%d: Unable to listen() successfully. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
 		fclose(config_file);
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
 	// get port number
 	int port_num;
 	if (getsockname(socket_fd, (struct sockaddr *)&sin, &server_addr_size) == -1) {
-		snprintf(log_message, 1024, "ERROR in PID%d: getsockname() failed. Terminating.\n", getpid());
+		snprintf(log_message, 2000, "ERROR in PID%d: getsockname() failed. Terminating.\n", getpid());
 		logMessage(log_message, log_file);
 		fclose(log_file);
 		fclose(config_file);
@@ -159,16 +159,17 @@ int main(int argc, char** argv) {
 	struct timeval tv;
 	tv->sec = 0;
 	tv->usec = 1000;
-	int new_fd, num_bytes;
+	int new_fd, num_bytes, status;
 	int fd_max = server_fd;
 	int client_count = 0;
-	char buffer[4];
+	char buffer[2100];
 
 	FD_SET(server_fd, &fd_list);
 
 	while (1) {
+		client_addr_size = sizeof(connecting_addr);
 		// exit loop if there are no more clients, and all files are complete
-		if (feof(config_file) != 0 && client_count == 0) break;
+		if (!feof(config_file) && client_count == 0) break;
 
 		fd_list_copy = fd_list;
 		if (select(fd_max+1, &fd_list_copy, NULL, NULL, tv) == -1) {
@@ -180,47 +181,88 @@ int main(int argc, char** argv) {
 			if (FD_ISSET(i, &fd_list_copy)) {
 				// got new connection
 				if (i == socket_fd) {
-					new_fd = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
-								&client_addr_size);
-					// accept() error
-					if (new_fd == -1) {
-						// *** might not be logged, not necessary?
-					}
-					// store the file descriptor of the new connection
-					else {
+					new_fd = accept(socket_fd, (struct sockaddr *)&connecting_addr,
+									&client_addr_size);
+					inet_ntop(	connecting_addr.ss_family, &connecting_addr->sin_address,
+								ip_string, INET_ADDRSTRLEN);
+					// accept() did not have an error
+					if (new_fd != -1) {
 						FD_SET(new_fd, &fd_list);
 						if (new_fd > fd_max) fd_max = new_fd;
 						client_count++;
 						// log the new connection
-						snprintf(log_message, 1024, "Successfully connected to lyrebird client %s",
-							inet_ntop(	connecting_addr.ss_family, &connecting_addr->sin_address,
-										ip_string, INET_ADDRSTRLEN));
+						snprintf(	log_message, 2000, "Successfully connected to lyrebird client %s",
+									ip_string);
 						logMessage(log_message, log_file);
 					}
 				}
-				// client is sending back status
+				// client is sending something back
 				else {
+					getpeername(i, (struct sockaddr *)&connecting_addr, &client_addr_size);
+					inet_ntop(	connecting_addr.ss_family, &connecting_addr->sin_address,
+								ip_string, INET_ADDRSTRLEN);
 					// check number of bytes recieved
-					if ((num_bytes = recv(i, buffer, sizeof(buffer), 0)) <= 0) {
+					if ((num_bytes = recv(i, &status, sizeof(status), 0)) <= 0) {
 						// 0 bytes = unexpected closure of connection
 						if (nbytes == 0) {
-							// *** log unexpected closure of connection
-							// *** record it
+							// unexpected closure of connection
+							if (!feof(config_file)) {
+								snprintf(	log_message, 2000,
+											"lyrebird client %s has disconnected unexpectedly.\n",
+											ip_string);
+								logMessage(log_message, log_file);
+							}
+							// expected closure
+							else {
+								snrprintf(	log_message, 2000,
+									"lyrebird client %s has disconnected expectedly",
+									ip_string);
+									logMessage(log_message, log_file);
+							}
 						}
 						// recv() error
 						else {
-							// *** might not be logged, not necessary?
+							// do nothing (doesn't have to be logged)
+							// and connection will be closed anyways
 						}
 						// remove connection i from list
 						close(i);
 						FD_CLR(i, &fd_list);
 						client_count--;
 					}
-					// successully recieved status
+					// successfully recieved status
 					else {
-						// *** check buffer for decryption result
-						// *** if there are more files, send to client
-						// *** else, send termination command
+						// if it's not the first time connecting, log decryption results
+						if (status != -1) {
+							recv(i, &buffer, status, 0);				// filename
+							recv(i, &status, sizeof(status), 0);		// result
+							if (status == 0) {		// decryption success
+								recv(i, &status, sizeof(status), 0);	// pid
+								snprintf(	log_message, 2000, "The lyrebird client %s
+											has successfully decrypted %s in process %d.\n",
+											ip_string, buffer, status);
+								logMessage(log_message, log_file);
+							}
+							else {		// decryption failure
+								recv(i, &status, sizeof(status), 0);	// pid
+								snprintf(	log_message, 2000, "The lyrebird client %s
+											has successfully decrypted %s in process %d.\n",
+											ip_string, buffer, status);
+								logMessage(log_message, log_file);
+							}
+						}
+						// send another file if available
+						// otherwise, send terminating codeword
+						if (!feof(config_file)) {
+							fgets(buffer, 2100, config_file);
+							status = strlen(buffer) + 1;
+							send(i, &buffer, status, 0);
+						}
+						else {
+							memset(buffer, 0, sizeof(char)*2100);
+							strcpy(buffer, "ayylmao");
+							send(i, &buffer, status, 0);
+						}
 					}
 				}
 			}

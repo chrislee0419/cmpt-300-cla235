@@ -43,20 +43,11 @@ int main(int argc, char** argv) {
 	// prepares log file
 	FILE* log_file;
 	char log_message[1024];
-	if ((log_file = fopen(argv[2], "w")) == NULL) {
-		printTime();
-		printf("ERROR in PID#%d:\n\tCould not open %s.\n\tTerminating.\n", getpid(), argv[2]);
-		return 2;
-	}
+	if ((log_file = prepareFile(argv[2], "w")) == NULL) return 2;
 
 	// open config file
 	FILE* config_file;
-	if ((config_file = fopen(argv[1], "r")) == NULL) {
-		snprintf(log_message, 1024, "ERROR in PID#%d: Could not open %s. Terminating.\n", getpid(), argv[1]);
-		logMessage(log_message, log_file);
-		fclose(log_file);
-		return 2;
-	}
+	if ((config_file = prepareFile(argv[1], "r")) == NULL) return 2;
 	// END OF PREPARATION
 	//
 
@@ -160,82 +151,167 @@ int main(int argc, char** argv) {
 	printTime();
 	printf("lyrebird.server: PID %d on host %s, port %d\n", getpid(), ip_string, port_num);
 
-	// prepare variables for main loop
-	fd_set client_fd_set;
+	//
+	// V2
+	//
+	fd_set fd_list;
+	fd_set fd_list_copy;
 	struct timeval tv;
-	int client_num = 0, i;
-	int *client_fd = malloc(sizeof(int));
+	tv->sec = 0;
+	tv->usec = 1000;
+	int new_fd, num_bytes;
+	int fd_max = server_fd;
+	int client_count = 0;
+	char buffer[4];
 
-	if (client_fd == NULL) {
-		snprintf(log_message, 1024, "ERROR in PID%d: malloc() failed. Terminating.\n", getpid());
-		logMessage(log_message, log_file);
-		fclose(log_file);
-		fclose(config_file);
-		close(socket_fd);
-		return 8;
-	}
+	FD_SET(server_fd, &fd_list);
 
-	// first accept(), can block if needed
-	client_fd[0] = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
-					&client_addr_size);
-	if (client_fd[0] == -1) {
-		snprintf(log_message, 1024, "ERROR in PID%d: initial accept() failed. Terminating.\n", getpid());
-		logMessage(log_message, log_file);
-		free(client_fd);
-		fclose(log_file);
-		fclose(config_file);
-		close(socket_fd);
-		return 9;
-	}
-	client_num = 1;
-	// realloc client_fd to accomodate for another connection
-	for (i = 0; i < 3; i++) {
-		temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
-		if (temp_ptr == NULL) {
-			if (i == 2) {
-				snprintf(log_message, 1024, "ERROR in PID%d: realloc() failed multiple times. Terminating.\n", getpid());
-				logMessage(log_message, log_file);
-				free(client_fd);
-				fclose(log_file);
-				fclose(config_file);
-				close(socket_fd);
-				return 10;
-			}
-		}
-		else break;
-	}
-
-
-
-	// main operational loop
 	while (1) {
-		// accept() if there are connections, does not block
-		client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
-								&client_addr_size, SOCK_NONBLOCK);
-		if (client_fd[client_num] == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
-			for (i = 1; i < 3; i++) {
-				snprintf(log_message, 1024, "WARNING in PID%d: accept4() failed. Retrying (%d of 3).\n", getpid(), i);
-				logMessage(log_message, log_file);
-				client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
-										&client_addr_size, SOCK_NONBLOCK);
-				if (client_fd[client_num] != -1 || errno == EAGAIN || errno == EWOULDBLOCK) break;
-			}
-			if (i == 3) {
-				snprintf(log_message, 1024, "ERROR in PID%d: accept4() failed too many times. Terminating.\n", getpid());
-				logMessage(log_message, log_file);
-				// terminate program
-				// ensure that clients also terminate correctly
+		// exit loop if there are no more clients, and all files are complete
+		if (feof(config_file) != 0 && client_count == 0) break;
+
+		fd_list_copy = fd_list;
+		if (select(fd_max+1, &fd_list_copy, NULL, NULL, tv) == -1) {
+			// *** close connections and exit with failure
+		}
+
+		for (i = 0; i <= fd_max; i++) {
+			// check if the ith file descriptor is ready to be read from
+			if (FD_ISSET(i, &fd_list_copy)) {
+				// got new connection
+				if (i == socket_fd) {
+					new_fd = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
+								&client_addr_size);
+					// accept() error
+					if (new_fd == -1) {
+						// *** might not be logged, not necessary?
+					}
+					// store the file descriptor of the new connection
+					else {
+						FD_SET(new_fd, &fd_list);
+						if (new_fd > fd_max) fd_max = new_fd;
+						client_count++;
+						// log the new connection
+						snprintf(log_message, 1024, "Successfully connected to lyrebird client %s",
+							inet_ntop(	connecting_addr.ss_family, &connecting_addr->sin_address,
+										ip_string, INET_ADDRSTRLEN));
+						logMessage(log_message, log_file);
+					}
+				}
+				// client is sending back status
+				else {
+					// check number of bytes recieved
+					if ((num_bytes = recv(i, buffer, sizeof(buffer), 0)) <= 0) {
+						// 0 bytes = unexpected closure of connection
+						if (nbytes == 0) {
+							// *** log unexpected closure of connection
+							// *** record it
+						}
+						// recv() error
+						else {
+							// *** might not be logged, not necessary?
+						}
+						// remove connection i from list
+						close(i);
+						FD_CLR(i, &fd_list);
+						client_count--;
+					}
+					// successully recieved status
+					else {
+						// *** check buffer for decryption result
+						// *** if there are more files, send to client
+						// *** else, send termination command
+					}
+				}
 			}
 		}
-		client_num++;
-		temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
-
-		// check for closed streams
-
-		// select non-busy connection
-		// if return value is not 1, report error
-
 	}
+
+
+	//
+	// V1
+	//
+
+	// prepare variables for main loop
+	// fd_set client_fd_set;
+	// struct timeval tv;
+	// int client_num = 0, i;
+	// int *client_fd = malloc(sizeof(int));
+	// int fd_max;
+
+	// tv->tv_sec = 0;
+	// tv->tv_usec = 1000;
+
+	// if (client_fd == NULL) {
+	// 	snprintf(log_message, 1024, "ERROR in PID%d: malloc() failed. Terminating.\n", getpid());
+	// 	logMessage(log_message, log_file);
+	// 	fclose(log_file);
+	// 	fclose(config_file);
+	// 	close(socket_fd);
+	// 	return 8;
+	// }
+
+	// // first accept(), can block if needed
+	// client_fd[0] = 	accept(socket_fd, (struct sockaddr *)&connecting_addr,
+	// 				&client_addr_size);
+	// if (client_fd[0] == -1) {
+	// 	snprintf(log_message, 1024, "ERROR in PID%d: initial accept() failed. Terminating.\n", getpid());
+	// 	logMessage(log_message, log_file);
+	// 	free(client_fd);
+	// 	fclose(log_file);
+	// 	fclose(config_file);
+	// 	close(socket_fd);
+	// 	return 9;
+	// }
+	// client_num = 1;
+	// // realloc client_fd to accomodate for another connection
+	// for (i = 0; i < 3; i++) {
+	// 	temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
+	// 	if (temp_ptr == NULL) {
+	// 		if (i == 2) {
+	// 			snprintf(log_message, 1024, "ERROR in PID%d: realloc() failed multiple times. Terminating.\n", getpid());
+	// 			logMessage(log_message, log_file);
+	// 			free(client_fd);
+	// 			fclose(log_file);
+	// 			fclose(config_file);
+	// 			close(socket_fd);
+	// 			return 10;
+	// 		}
+	// 	}
+	// 	else break;
+	// }
+
+
+
+	// // main operational loop
+	// while (1) {
+	// 	// accept() if there are connections, does not block
+	// 	client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
+	// 							&client_addr_size, SOCK_NONBLOCK);
+	// 	if (client_fd[client_num] == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+	// 		for (i = 1; i < 3; i++) {
+	// 			snprintf(log_message, 1024, "WARNING in PID%d: accept4() failed. Retrying (%d of 3).\n", getpid(), i);
+	// 			logMessage(log_message, log_file);
+	// 			client_fd[client_num] = accept4(socket_fd, (struct sockaddr *)&connecting_addr,
+	// 									&client_addr_size, SOCK_NONBLOCK);
+	// 			if (client_fd[client_num] != -1 || errno == EAGAIN || errno == EWOULDBLOCK) break;
+	// 		}
+	// 		if (i == 3) {
+	// 			snprintf(log_message, 1024, "ERROR in PID%d: accept4() failed too many times. Terminating.\n", getpid());
+	// 			logMessage(log_message, log_file);
+	// 			// terminate program
+	// 			// ensure that clients also terminate correctly
+	// 		}
+	// 	}
+	// 	client_num++;
+	// 	temp_ptr = realloc(client_fd, sizeof(int)*(client_num+1));
+
+	// 	// check for closed streams
+
+	// 	// select non-busy connection
+	// 	// if return value is not 1, report error
+
+	// }
 
 	fclose(log_file);
 	close(socket_fd);

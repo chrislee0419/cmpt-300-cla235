@@ -15,6 +15,11 @@
 void printTime();
 void logTime(FILE* log_file);
 void logMessage(char* message, FILE* log_file);
+
+FILE* prepareFile(char* file, char* op);
+void confirmTermination(int pid);
+
+void childProcess(int recieve_pipe, int send_pipe);
 int childDecrypt(char* input_filename, char* output_filename);
 
 

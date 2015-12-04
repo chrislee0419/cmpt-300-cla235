@@ -277,7 +277,6 @@ int main(int argc, char** argv) {
 							buffer[status - 1] = '\0';
 							send(i, &status, sizeof(int), 0);
 							send(i, buffer, status, 0);
-							printf("%d %s\n",status, buffer);
 							buffer_ptr = buffer;
 							buffer = strsep(&buffer, " ");
 							snprintf(	log_message, 2000, "The lyrebird client %s "

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+	<style>
+		div.para {
+			text-align: left;
+			width: 900px;
+			float: left;
+			padding: 10px;
+		}
+		div.document {
+			text-align: center;
+			width: 1000px;
+			padding: 10px;
+		}
+	</style>
+	<head>
+		<title>CMPT 300: Assignment 4</title>
+	</head>
+	Name: 		Chris Lee<br>
+	Student #: 	301238906<br>
+	SFU ID: 	cla235<br>
+
+	Course: 	CMPT 300 D100<br>
+	Instructor: Brian Booth<br>
+	TA: 		Scott Kristjanson<br>
+	<body>
+		<center>
+		<div class="document">
+		<div class="para">
+		<h1><b>OVERVIEW</b></h1>
+			<p>The "Lyrebird" programs contained in this .zip are used to decrypt tweet sized messages. This program differs from the previous program in that a server tells connected clients which files to decrypt using sockets. The clients will take the filenames and distribute them among its child processes. The reasoning for the update to the program is that we could distribute the load among many different clients, allowing for very quick decryptions of many files.</p>
+		</div>
+		<div class="para">
+		<h1><b>DESIGN AND IMPLEMENTATION</b></h1>
+			<h3><u>ALGORITHM OF SERVER.C</u></h3>
+				<p>The program begins by initializing structures and variables that will be used to connect to the client programs. The server made calls to: getaddrinfo(), socket(), bind(), and listen(), in that order. Once these operations are finished, the server will be waiting for a client to connect.</p>
+				<p>At this point, the server is in an infinite loop, with select() controlling the actions in the loop. When a client connects, select() will permit the program to go find the socket file descriptor and accept the connection from the client.</p>
+				<p>If a client is ready to receive encrypted files, the client will send an integer back, causing select() to stop blocking. If the client sent a -1, this means that it is the client's first time receiving a file. If the client sent a non-zero number, then the client has sent back the length of the input filename that it has just finished. This will be followed by the input filename string, a result (integer), and the PID of the child process that has finished the decryption. The server will then log these values. If client closes the connection, then the server will log this, depending on whether it was expected.</p>
+				<p>At this point, the client is ready to receive a new file. The server sends the length of the filename pair, then the actual filename string. If there are no more files to decrypt, the server will instead send -1, which tells the client to shut down. In the loop, if there are no more files to decrypt and all client connections have been closed, the server will exit the loop, free any malloc'd memory, and exit.</p>
+			<h3><u>ALGORITHM OF CLIENT.C</u></h3>
+				<p>The client program begins by attempting to connect to the provided address and port. This is done with htons(), inet_pton(), socket(), and connect(). If the program connects successfully, N-1 child processes will be initialized using pipe() and fork(), with N = number of CPU cores.</p>
+				<p>After this process, the parent will go into an infinite loop, with select() controlling how the program proceeds. The program will exit this loop when: the connection between the server and the program is severed, there are no more child processes (they've all crashed), or the termination code (-1) has been sent.</p>
+				<p>The select() will stop blocking once a child process sends an integer to the parent. If the integer is -1 if the child has not yet received a file to decrypt. Otherwise, it is the length of the input filename that the child has tried to decrypt. The parent will then receive the input filename string, decryption result, and pid of the child process, which it will send back to the server for logging.</p>
+				<p>In both cases, the server will send the next encrypted files to the client, which will send it over to the child processes for decryption. Again, the program will exit if the server instead, sends -1.</p>
+				<p>After exiting the loop, the parent process will check if there are any children still alive, and will kill them and close the associated pipes.</p>
+		</div>
+		<div class="para">
+		<h1><b>HOW I TESTED THE PROGRAM</b></h1>
+			
+			<p>I started testing my code after I've finished the entire program. First, I debugged the programs using gdb and valgrind. Initially, I tested the server and client running on the same computer. When it was successful, I tested the programs running on multiple (3) computers in CSIL.</p>
+			<p>I checked what would happen based on the inputs given by the user. If the server could not open a stream for the config file or the log file, the program would terminate. Similarly, if the incorrect IP address or port number was given to the client, the program would terminate. I then tested how the program would handle the test files from the assignment 3 test cases, specifically test 4 (20 files) and 6 (2500 files).</p>
+			<p>A problem I came across while testing with gdb (and was unable to fix) was that the server might hang indefinitely after connecting with the first client. The server seems to get stuck at line 275 of my code [fgets(buffer, 2100, config_file);].</p>
+		</div>
+		</div>
+		</center>
+	</body>
+</html>

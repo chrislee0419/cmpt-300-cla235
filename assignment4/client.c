@@ -42,35 +42,27 @@ int main (int argc, char** argv) {
 	//
 	//	SETTING UP CONNECTION WITH SERVER
 	int status, socket_fd;
-	char server_ip_storage[INET_ADDRSTRLEN];
-	struct addrinfo hints, *servinfo, *p;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
+	struct sockaddr_in server_addr;
 
-	if ((status = getaddrinfo(argv[1], port, &hints, &servinfo)) != 0) {
-		printf("ERROR in PID#%d:\n\tgetaddrinfo() failed for the provided arguments.\n\tTerminating.\n", getpid());
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(atoi(argv[2]));
+	if (inet_pton(AF_INET, argv[1], &server_addr.sin_addr) < 0) {
+		printTime();
+		printf("ERROR in PID#%d:\n\tCouldn't set IP address.\n\tTerminating.\n", getpid());
 		return 2;
 	}
-
-	// loop through results
-	for (p = servinfo; p != NULL; p = p->ai_next) {
-		if ((socket_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) continue;
-		if (connect(socket_fd, p->ai_addr, p->ai_addrlen) == -1) {
-			close(socket_fd);
-			continue;
-		}
+	if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		printTime();
-		printf("lyrebird client: PID %d connected to server %s on port %d.\n", getpid(),
-			inet_ntop(p->ai_family, p->ai_addr, server_ip_storage, INET_ADDRSTRLEN), port);
-		break;
-	}
-	if (p == NULL) {
-		printTime();
-		printf("ERROR in PID#%d:\n\tFailed to connect to server.\n\tTerminating", getpid());
+		printf("ERROR in PID#%d:\n\tsocket() failed.\n\tTerminating.\n", getpid());
 		return 3;
 	}
-	freeaddrinfo(servinfo);
+	if (connect(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+		printTime();
+		printf("ERROR in PID#%d:\n\tconnect() failed.\n\tTerminating.\n", getpid());
+		return 4;
+	}
+	printTime();
+	printf("lyrebird.client: PID %d connected to server %s on port %s.\n", getpid(), argv[1], argv[2]);
 	//	CONNECTION WITH SERVER IS SUCCESSFUL
 	//
 
@@ -154,6 +146,7 @@ int main (int argc, char** argv) {
 		int status = -1;
 		int fd_max = 0;
 		char *input_filename, *output_filename, *filenames, *filename_ptr;
+		char comparison[2100];
 		char buffer[1024];
 		
 		// include all child->parent pipes into the fd_read_list
@@ -167,7 +160,7 @@ int main (int argc, char** argv) {
 		send(socket_fd, &status, sizeof(int), 0);
 
 		// main loop
-		while(1) {
+		while (1) {
 			// check if there is still at least one child process hasn't crashed
 			status = 0;
 			for (i = 0; i < available_cores; i++) {
@@ -178,26 +171,34 @@ int main (int argc, char** argv) {
 			}
 			if (status == 0) break;
 
-
 			filenames = malloc(sizeof(char)*2100);
 			if (filenames == NULL) break;
 			memset(filenames, 0, sizeof(char)*2100);
 			filename_ptr = filenames;
 
 			// receive filename from server
-			if ((num_bytes = recv(socket_fd, filenames, 2100, 0)) == -1) {
+			if ((num_bytes = recv(socket_fd, &status, sizeof(int), 0)) == -1) {
 				free(filenames);
 				break;
 			}
-			// server has sent termination codeword
-			if (strcmp(filenames, "ayylmao") == 0) {
+			if (status == -1) {
 				free(filenames);
 				break;
 			}
-			input_filename = strsep(filenames, ' ');
-			output_filename = strsep(filenames, '\n');
-			if (strcmp(input_filename, output_filename) == 0) {
-				// *** send failure status? (same filenames)
+			recv(socket_fd, filenames, status, 0);
+
+			if (filenames == NULL) {
+				status = -1;
+				send(socket_fd, &status, sizeof(int), 0);
+				free(filename_ptr);
+				continue;
+			}
+
+			input_filename = strsep(&filenames, " ");
+			output_filename = strsep(&filenames, "\n");
+			if (input_filename == NULL || output_filename == NULL) {
+				status = -1;
+				send(socket_fd, &status, sizeof(int), 0);
 				free(filename_ptr);
 				continue;
 			}
@@ -215,18 +216,20 @@ int main (int argc, char** argv) {
 					num_bytes = read(i, &status, sizeof(status));	// filename length
 					// child process has encountered an error that has caused an exit
 					if (num_bytes == 0) {
-						FD_CLR(i, fd_read_list);
+						FD_CLR(i, &fd_read_list);
 						confirmTermination(pid[j]);
 						pid[j] = -1;
 					}
-					read(i, &buffer, status);						// filename
-					read(i, &status, sizeof(status));				// result
-					length = strlen(buffer);
-					send(socket_fd, &length, sizeof(int), 0);
-					send(socket_fd, &buffer, length, 0);			// filename
-					send(socket_fd, &status, sizeof(status), 0);	// result
-					send(socket_fd, &pid[j], sizeof(int), 0);		// pid
-
+					if (status != -1) {
+						read(i, buffer, status);						// filename
+						read(i, &status, sizeof(status));				// result
+						length = strlen(buffer) + 1;
+						send(socket_fd, &length, sizeof(int), 0);
+						send(socket_fd, buffer, length, 0);			// filename
+						send(socket_fd, &status, sizeof(status), 0);	// result
+						send(socket_fd, &pid[j], sizeof(int), 0);		// pid
+					}
+					else send(socket_fd, &status, sizeof(int), 0);
 					// ready for next file
 					status = strlen(input_filename) + 1;
 					write(pipes[2*j][1], &status, sizeof(status));
@@ -248,6 +251,8 @@ int main (int argc, char** argv) {
 			confirmTermination(pid[i]);
 		}
 	}
+	printTime();
+	printf("lyrebird client: PID %d completed its tasks and is exiting successfully.\n", getpid());
 	//	PARENT PROCESS ENDS HERE
 	//
 

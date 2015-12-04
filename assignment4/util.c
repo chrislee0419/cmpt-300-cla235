@@ -74,9 +74,9 @@ void confirmTermination(int pid) {
 // sends:
 //		length of input_filename
 //		input_filename
-//		success/failure (0/1)
+//		initial/success/failure (-1/0/1)
 void childProcess(int recieve_pipe, int send_pipe) {
-	int a, res, status = 0, string_length = 0, counter = 0;
+	int a, res, status = -1, string_length = 0, counter = 0;
 	char* input_filename = malloc(sizeof(char) * 1025);
 	char* output_filename = malloc(sizeof(char) * 1025);
 
@@ -134,8 +134,8 @@ int childDecrypt(char* input_filename, char* output_filename) {
 
 	// if string_input or string_output fail to open, skip file
 	if (string_input == NULL || string_output == NULL) {
-		if (string_input != NULL) close(string_input);
-		if (string_output != NULL) close(string_output);
+		if (string_input != NULL) fclose(string_input);
+		if (string_output != NULL) fclose(string_output);
 		return 1;
 	}
 

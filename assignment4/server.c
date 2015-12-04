@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
 							recv(i, &status, sizeof(status), 0);		// result
 							if (status == 0) {		// decryption success
 								recv(i, &status, sizeof(status), 0);	// pid
-								snprintf(	log_message, 2000, "The lyrebird client %s"
+								snprintf(	log_message, 2000, "The lyrebird client %s "
 											"has successfully decrypted %s in process %d.\n",
 											ip_string, buffer, status);
 								logMessage(log_message, log_file);

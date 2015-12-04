@@ -104,7 +104,7 @@ void childProcess(int recieve_pipe, int send_pipe) {
     	// send parent process information on the decryption
     	status = strlen(input_filename) + 1;
     	write(send_pipe, &status, sizeof(status));
-    	write(send_pipe, &input_filename, status);
+    	write(send_pipe, input_filename, status);
     	// if a file failed to decrypt, send failure
     	if (res != 0) status = 1;
     	// else, send success

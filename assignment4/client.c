@@ -171,37 +171,37 @@ int main (int argc, char** argv) {
 			}
 			if (status == 0) break;
 
-			filenames = malloc(sizeof(char)*2100);
-			if (filenames == NULL) break;
-			memset(filenames, 0, sizeof(char)*2100);
-			filename_ptr = filenames;
+			// filenames = malloc(sizeof(char)*2100);
+			// if (filenames == NULL) break;
+			// memset(filenames, 0, sizeof(char)*2100);
+			// filename_ptr = filenames;
 
-			// receive filename from server
-			if ((num_bytes = recv(socket_fd, &status, sizeof(int), 0)) == -1) {
-				free(filenames);
-				break;
-			}
-			if (status == -1) {
-				free(filenames);
-				break;
-			}
-			recv(socket_fd, filenames, status, 0);
+			// // receive filename from server
+			// if ((num_bytes = recv(socket_fd, &status, sizeof(int), 0)) == -1) {
+			// 	free(filenames);
+			// 	break;
+			// }
+			// if (status == -1) {
+			// 	free(filenames);
+			// 	break;
+			// }
+			// recv(socket_fd, filenames, status, 0);
 
-			if (filenames == NULL) {
-				status = -1;
-				send(socket_fd, &status, sizeof(int), 0);
-				free(filename_ptr);
-				continue;
-			}
+			// if (filenames == NULL) {
+			// 	status = -1;
+			// 	send(socket_fd, &status, sizeof(int), 0);
+			// 	free(filename_ptr);
+			// 	continue;
+			// }
 
-			input_filename = strsep(&filenames, " ");
-			output_filename = strsep(&filenames, "\n");
-			if (input_filename == NULL || output_filename == NULL) {
-				status = -1;
-				send(socket_fd, &status, sizeof(int), 0);
-				free(filename_ptr);
-				continue;
-			}
+			// input_filename = strsep(&filenames, " ");
+			// output_filename = strsep(&filenames, "\n");
+			// if (input_filename == NULL || output_filename == NULL) {
+			// 	status = -1;
+			// 	send(socket_fd, &status, sizeof(int), 0);
+			// 	free(filename_ptr);
+			// 	continue;
+			// }
 
 			fd_copy_list = fd_read_list;
 			if (select(fd_max+1, &fd_copy_list, NULL, NULL, NULL) == -1) {
@@ -212,6 +212,30 @@ int main (int argc, char** argv) {
 			for (i = 0; i <= fd_max; i++) {
 				// check if the ith file descriptor is ready to be read from
 				if (FD_ISSET(i, &fd_copy_list)) {
+					filenames = malloc(sizeof(char)*2100);
+					if (filenames == NULL) break;
+					memset(filenames, 0, sizeof(char)*2100);
+					filename_ptr = filenames;
+
+					// receive filename from server
+					if ((num_bytes = recv(socket_fd, &status, sizeof(int), 0)) == -1) {
+						free(filenames);
+						break;
+					}
+					if (status == -1) {
+						free(filenames);
+						break;
+					}
+					recv(socket_fd, filenames, status, 0);
+					input_filename = strsep(&filenames, " ");
+					output_filename = strsep(&filenames, "\n");
+					if (input_filename == NULL || output_filename == NULL) {
+						status = -1;
+						send(socket_fd, &status, sizeof(int), 0);
+						free(filename_ptr);
+						continue;
+					}
+
 					for (j = 0; j < available_cores; j++) if (pipes[2*j+1][0] == i) break;
 					num_bytes = read(i, &status, sizeof(status));	// filename length
 					// child process has encountered an error that has caused an exit
@@ -225,7 +249,7 @@ int main (int argc, char** argv) {
 						read(i, &status, sizeof(status));				// result
 						length = strlen(buffer) + 1;
 						send(socket_fd, &length, sizeof(int), 0);
-						send(socket_fd, buffer, length, 0);			// filename
+						send(socket_fd, buffer, length, 0);				// filename
 						send(socket_fd, &status, sizeof(status), 0);	// result
 						send(socket_fd, &pid[j], sizeof(int), 0);		// pid
 					}
@@ -238,9 +262,11 @@ int main (int argc, char** argv) {
 		        	write(pipes[2*j][1], &status, sizeof(status));
 		        	write(pipes[2*j][1], output_filename, status);
 		        	free(filename_ptr);
-		        	break;
+		        	continue;
 				}
 			}
+			// recv() failed
+			if (i != fd_max+1) break;
 		}
 		// completion or failure event has caused the termination of the program
 		for (i = 0; i < available_cores; i++) {
